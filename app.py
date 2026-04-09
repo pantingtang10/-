@@ -5,18 +5,18 @@ import openai
 import base64
 import io
 import json
+import re
 from docx import Document
-from diff_match_patch import diff_match_patch
 
 # --- 页面全局配置 ---
 st.set_page_config(page_title="Academic Intelligence Studio Ultra", layout="wide", initial_sidebar_state="expanded")
 
-# --- 侧边栏：全引擎配置 ---
+# --- 侧边栏：多引擎及参数配置 ---
 with st.sidebar:
-    st.title("⚙️ 全球 AI 引擎中心")
-    engine_choice = st.selectbox("核心引擎 (需对应 Key)", [
-        "Google Gemini Pro",
-        "智谱 GLM-4v (推荐)",
+    st.title("⚙️ 全球 AI 引擎配置中心")
+    engine_choice = st.selectbox("核心引擎 (请确保 Key 正确)", [
+        "Google Gemini Pro (免费版可用)",
+        "智谱 GLM-4v (国内推荐)",
         "字节豆包 (Doubao)",
         "Kimi (Moonshot)",
         "DeepSeek V3",
@@ -24,27 +24,30 @@ with st.sidebar:
     ])
     api_key = st.text_input("输入 API 密钥 (Key)", type="password")
     
-    # 特殊处理：豆包需要 Endpoint ID
+    # 豆包专用 Endpoint ID
     ep_id = ""
-    if engine_choice == "字节豆包 (Doubao)":
+    if "Doubao" in engine_choice:
         ep_id = st.text_input("豆包 Endpoint ID (必填)", type="default")
 
     st.divider()
-    st.subheader("📚 期刊 LetPub 筛选器")
-    if_range = st.slider("影响因子", 0.0, 50.0, (5.0, 7.0))
-    cas_zone = st.multiselect("分区", ["Zone 1", "Zone 2", "Zone 3"], default=["Zone 2"])
-    
-    st.divider()
-    st.subheader("🖼️ Illustrator 导出")
-    dpi_val = st.selectbox("导出精度 (DPI)", [300, 600, 1200], index=0)
+    st.subheader("📊 LetPub 期刊硬性过滤")
+    if_range = st.slider("影响因子 (IF) 范围", 0.0, 50.0, (5.0, 7.0))
+    cas_zone = st.multiselect("中科院分区", ["1区", "2区", "3区"], default=["2区"])
+    sci_zone = st.multiselect("SCI 分区 (Q)", ["Q1", "Q2", "Q3"], default=["Q1", "Q2"])
+    is_oa = st.checkbox("仅限 Open Access (OA)")
 
-# --- 核心 AI 调用函数 (全供应商自动路由) ---
+    st.divider()
+    st.subheader("🖼️ Illustrator 导出参数")
+    dpi_val = st.selectbox("导出精度 (DPI)", [300, 600, 1200], index=0)
+    export_fmt = st.selectbox("导出格式", ["PDF", "PNG", "TIFF"])
+
+# --- 核心 AI 调用函数 (支持全供应商路由) ---
 def get_ai_response(messages, custom_model=None):
-    if not api_key: return "ERROR: Missing API Key"
+    if not api_key: return "ERROR: 密钥缺失"
     
     config = {
-        "Google Gemini Pro": {"url": "https://generativelanguage.googleapis.com/v1beta/openai/", "model": "gemini-1.5-pro"},
-        "智谱 GLM-4v (推荐)": {"url": "https://open.bigmodel.cn/api/paas/v4/", "model": "glm-4v"},
+        "Google Gemini Pro (免费版可用)": {"url": "https://generativelanguage.googleapis.com/v1beta/openai/", "model": "gemini-1.5-pro"},
+        "智谱 GLM-4v (国内推荐)": {"url": "https://open.bigmodel.cn/api/paas/v4/", "model": "glm-4v"},
         "字节豆包 (Doubao)": {"url": "https://ark.cn-beijing.volces.com/api/v3", "model": ep_id},
         "Kimi (Moonshot)": {"url": "https://api.moonshot.cn/v1", "model": "moonshot-v1-8k"},
         "DeepSeek V3": {"url": "https://api.deepseek.com", "model": "deepseek-chat"},
@@ -66,47 +69,47 @@ def get_ai_response(messages, custom_model=None):
         return f"ERROR: {str(e)}"
 
 # --- UI 导航 ---
-st.title("🎓 顶级科研全生命周期全能工作站")
-tabs = st.tabs(["🔍 SCI 结果描述", "🎨 Pro 画布 (Illustrator)", "✍️ 交互式润色/降AI", "📊 期刊匹配", "💡 创新大脑实验室"])
+st.title("🔬 顶级科研全生命周期全能工作站")
+tabs = st.tabs(["🔍 SCI 结果描述", "🎨 Pro 画布 (Illustrator)", "✍️ 交互式润色/降AI", "📊 期刊匹配 (LetPub)", "💡 创新大脑实验室"])
 
 # --- 模块 1: SCI 结果描述 ---
 with tabs[0]:
-    st.header("SCI Results & Figure Analysis")
+    st.header("Manuscript & Figure Neural Description")
     c1, c2 = st.columns(2)
     with c1:
-        ms_file = st.file_uploader("上传手稿", type=["docx", "pdf", "txt"])
-        figs_up = st.file_uploader("上传关键图表", accept_multiple_files=True)
+        ms_file = st.file_uploader("上传手稿 (DOCX/PDF)", type=["docx", "pdf"])
+        figs_up = st.file_uploader("上传清晰图表/表格", accept_multiple_files=True)
     with c2:
-        out_lang = st.radio("生成语言", ["中文", "英文"], horizontal=True)
-        if st.button("开始解析描述"):
-            with st.spinner("AI 正在比对手稿与图表..."):
-                prompt = [{"role":"user","content":f"请作为顶刊审稿人。结合上传的内容，生成符合SCI标准的结果描述。包含详细数据版和精简版。使用{out_lang}。"}]
+        out_lang = st.radio("生成语言", ["中文 (Chinese)", "英文 (English)"], horizontal=True)
+        if st.button("生成 SCI 级详细描述"):
+            with st.spinner("多模态数据分析中..."):
+                prompt = [{"role":"user","content":f"请作为顶刊资深审稿人。结合上传的内容，详细描述实验结果。要求：包含具体的数据引用（如OR, 95%CI, P值），分为‘结果详述’和‘结论摘要’。使用{out_lang}。"}]
                 st.markdown(get_ai_response(prompt))
 
 # --- 模块 2: Pro 画布 (对标 Adobe Illustrator) ---
 with tabs[1]:
     st.header("Vector Figure Illustrator Pro")
-    st.caption("支持 PDF 插入、层级管理、查找相同颜色/字号并批量修改。")
+    st.caption("功能：支持多 PDF 插入、层级排列、颜色查找修改、1200DPI 采样导出。")
     
     editor_html = f"""
-    <div style="display:flex; gap:10px; background:#1e1e1e; padding:15px; border-radius:10px; color:white;">
-        <div id="canv-main">
-            <div style="margin-bottom:10px; display:flex; gap:8px;">
+    <div style="display:flex; gap:10px; background:#1a1a1a; padding:15px; border-radius:10px; color:white;">
+        <div id="canvas-container">
+            <div id="tools" style="margin-bottom:12px; display:flex; gap:8px;">
                 <input type="file" id="pdfAdd" multiple style="display:none">
-                <button onclick="document.getElementById('pdfAdd').click()" style="background:#444; color:white; border:none; padding:8px 12px; cursor:pointer;">📁 插入 PDF/图片</button>
-                <button onclick="addText()" style="background:#444; color:white; border:none; padding:8px 12px; cursor:pointer;">T 文本</button>
-                <button onclick="batchModify()" style="background:#f39c12; color:white; border:none; padding:8px 12px; cursor:pointer; font-weight:bold;">✨ 查找相同修改</button>
-                <button onclick="exportPro()" style="background:#28a745; color:white; border:none; padding:8px 12px; cursor:pointer;">🚀 导出 {dpi_val}DPI</button>
+                <button onclick="document.getElementById('pdfAdd').click()" style="background:#444; color:white; border:none; padding:8px 15px; cursor:pointer; border-radius:4px;">📁 插入 PDF/图片</button>
+                <button onclick="addText()" style="background:#444; color:white; border:none; padding:8px 15px; cursor:pointer; border-radius:4px;">T 文本</button>
+                <button onclick="batchEdit()" style="background:#f39c12; color:white; border:none; padding:8px 15px; cursor:pointer; font-weight:bold; border-radius:4px;">✨ 查找并批量修改</button>
+                <button onclick="exportPro()" style="background:#28a745; color:white; border:none; padding:8px 15px; cursor:pointer; border-radius:4px;">🚀 导出 {export_fmt}</button>
             </div>
-            <canvas id="c" width="900" height="600" style="border:1px solid #000; background:white;"></canvas>
+            <canvas id="c" width="900" height="620" style="border:1px solid #333; background:white;"></canvas>
         </div>
-        <div style="width:220px; background:#2d2d2d; padding:15px; font-size:12px;">
-            <h4>属性 (Properties)</h4>
-            字体: <select id="fFam" style="width:100%"><option>Times New Roman</option><option>Arial</option></select><br><br>
-            字号: <input type="number" id="fSiz" value="28" style="width:100%"><br><br>
-            颜色: <input type="color" id="fCol" style="width:100%"><br><br>
-            <hr>
-            <p>说明：PDF 插入后点击元素即可移动。使用批量修改同步全画布标签。</p>
+        <div id="control-panel" style="width:240px; background:#2d2d2d; padding:20px; border-radius:8px;">
+            <h4 style="margin-top:0">属性面板 (Pro)</h4>
+            字体: <select id="fFam" style="width:100%; margin-bottom:15px;"><option>Times New Roman</option><option>Arial</option><option>Helvetica</option></select>
+            字号: <input type="number" id="fSiz" value="28" style="width:100%; margin-bottom:15px;">
+            颜色: <input type="color" id="fCol" style="width:100%; margin-bottom:15px;">
+            <hr style="border:0.5px solid #555">
+            <p style="font-size:11px; color:#aaa;">说明：选中一个文字标注，点击“查找并批量修改”，全图所有相同颜色和字号的标注将一键同步颜色和字体。</p>
         </div>
     </div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
@@ -115,14 +118,15 @@ with tabs[1]:
         const canvas = new fabric.Canvas('c');
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
 
-        function batchModify() {{
+        function batchEdit() {{
             const ref = canvas.getActiveObject();
-            if(!ref) return;
-            const nCol = document.getElementById('fCol').value;
-            const nSiz = parseInt(document.getElementById('fSiz').value);
+            if(!ref) return alert("请先选中一个样板元素！");
+            const newCol = document.getElementById('fCol').value;
+            const newSiz = parseInt(document.getElementById('fSiz').value);
+            const newFam = document.getElementById('fFam').value;
             canvas.getObjects().forEach(obj => {{
                 if(obj.type === ref.type && (obj.fill === ref.fill || obj.fontSize === ref.fontSize)) {{
-                    obj.set({{ fill: nCol, fontSize: nSiz, fontFamily: document.getElementById('fFam').value }});
+                    obj.set({{ fill: newCol, fontSize: newSiz, fontFamily: newFam }});
                 }}
             }});
             canvas.renderAll();
@@ -155,104 +159,112 @@ with tabs[1]:
         }};
 
         function addText() {{ canvas.add(new fabric.IText('Text Label', {{ left: 150, top: 150, fontFamily: 'Times New Roman', fontSize: 24 }})); }}
+        
         function exportPro() {{
             const mul = {dpi_val} / 96;
             const dataURL = canvas.toDataURL({{ format: 'png', multiplier: mul }});
             const link = document.createElement('a');
-            link.download = "Academic_Figure.png"; link.href = dataURL; link.click();
+            link.download = "Academic_Illustrator_Figure.png"; link.href = dataURL; link.click();
         }}
     </script>
     """
-    components.html(editor_html, height=750)
+    components.html(editor_html, height=780)
 
 # --- 模块 3: 交互式润色与降 AI (Quillbot/Paperpal 风格) ---
 with tabs[2]:
     st.header("Interactive Academic Polisher & Humanizer")
+    st.caption("原理：对标 Paperpal 的句子级润色。点击下方句子可自由切换润色版本，支持降 AI 模式。")
     
-    if 'polished_sentences' not in st.session_state:
-        st.session_state.polished_sentences = []
+    if 'polished_data' not in st.session_state:
+        st.session_state.polished_data = []
 
-    text_to_process = st.text_area("输入原始学术文本", height=200)
-    mode = st.radio("模式", ["专业润色 (Make Academic)", "降 AI 重构 (Humanizer)"], horizontal=True)
+    text_input = st.text_area("输入原始学术文本 (段落)", height=200, placeholder="We observed that the mortality rate was high...")
+    mode = st.radio("润色模式", ["专业学术润色 (Academic Polishing)", "降低 AI 率重构 (De-AI Humanizer)"], horizontal=True)
 
-    if st.button("开始润色"):
-        with st.spinner("正在逐句处理..."):
-            # 这里的逻辑是把整段话传给AI，让它按JSON格式返回每一句的润色建议
-            prompt = f"""
-            Act as a senior academic editor. For the following text, break it into sentences.
-            For each sentence, provide 3 versions: 
-            1. Original
-            2. Academic (Formal, Paperpal-style)
-            3. Fluent/Humanized (Reduce AI rate, Quillbot-style)
-            Output ONLY a JSON list: [{"orig": "...", "acad": "...", "human": "..."}]
-            Text: {text_to_process}
-            """
-            res = get_ai_response([{"role": "user", "content": prompt}])
-            if "ERROR" in res:
-                st.error(res)
-            else:
+    if st.button("执行句子级分析"):
+        if text_input:
+            with st.spinner("AI 正在逐句处理并重构逻辑..."):
+                # 修复 f-string 占位符错误：使用 {{ }}
+                prompt = f"""
+                Act as a senior academic editor. Break the following text into sentences.
+                For each sentence, provide 3 versions:
+                1. Original (原文)
+                2. Academic (Formal, Paperpal-style, no meaning change)
+                3. Humanized (Reduce AI rate, varied structure, professional)
+                Output ONLY a valid JSON list of objects: [{{"orig": "...", "acad": "...", "human": "..."}}]
+                Text: {text_input}
+                """
+                res = get_ai_response([{"role": "user", "content": prompt}])
                 try:
-                    # 去除可能存在的 Markdown 代码块
-                    clean_res = res.replace("```json", "").replace("```", "").strip()
-                    st.session_state.polished_sentences = json.loads(clean_res)
-                except:
-                    st.error("AI 响应格式解析失败，请重试。")
+                    # 清洗 JSON 字符串
+                    clean_res = re.sub(r'```json\n?|\n?```', '', res).strip()
+                    st.session_state.polished_data = json.loads(clean_res)
+                except Exception as e:
+                    st.error(f"解析失败。原因: {str(e)}. AI 返回内容: {res}")
 
-    # 渲染交互式句子列表
-    if st.session_state.polished_sentences:
-        st.subheader("点击句子进行替换:")
-        final_output = []
-        for i, item in enumerate(st.session_state.polished_sentences):
-            with st.expander(f"Sentence {i+1}: {item['orig'][:50]}..."):
-                choice = st.radio(f"Select version for S{i+1}", 
-                                  [item['orig'], item['acad'], item['human']], 
-                                  key=f"choice_{i}")
-                final_output.append(choice)
+    if st.session_state.polished_data:
+        st.subheader("💡 逐句修订 (点击选择最佳版本):")
+        final_list = []
+        for i, item in enumerate(st.session_state.polished_data):
+            with st.expander(f"句子 {i+1}: {item['orig'][:60]}..."):
+                choice = st.radio(f"选择 S{i+1} 版本", 
+                                 [item['orig'], item['acad'], item['human']], 
+                                 key=f"choice_{i}",
+                                 index=1 if mode == "专业学术润色 (Academic Polishing)" else 2)
+                final_list.append(choice)
         
+        full_polished = " ".join(final_list)
         st.divider()
-        st.subheader("最终合成文本:")
-        full_text = " ".join(final_output)
-        st.text_area("已修改内容", full_text, height=200)
-        st.download_button("导出修订版 DOCX", "Download logic here...", file_name="Revised.docx")
+        st.subheader("最终输出结果:")
+        st.text_area("已修改文本 (可直接复制)", full_polished, height=200)
+        
+        # 导出 Word
+        doc = Document()
+        doc.add_paragraph(full_polished)
+        bio = io.BytesIO()
+        doc.save(bio)
+        st.download_button("导出为 Word (修订版)", bio.getvalue(), "Revised_Manuscript.docx")
 
-# --- 模块 4: 期刊推荐 (LetPub/JANE 逻辑) ---
+# --- 模块 4: 期刊推荐 (LetPub 逻辑) ---
 with tabs[3]:
-    st.header("LetPub Strategic Matcher")
-    abs_text = st.text_area("输入论文摘要", height=150)
-    if st.button("深度匹配期刊"):
-        prompt = f"基于摘要，在 IF {if_range} 和 中科院 {cas_zone} 范围内推荐 10 个真实期刊。给出期刊名、IF、分区、简介及相似数据库发表文章。"
+    st.header("LetPub Strategic Journal Finder")
+    st.write(f"当前筛选：IF {if_range[0]}-{if_range[1]} | 中科院 {cas_zone} | SCI {sci_zone} | OA: {is_oa}")
+    abs_text = st.text_area("输入摘要", height=150)
+    if st.button("检索真实期刊库"):
+        prompt = f"参考 LetPub 和 Jane。基于摘要，在 IF {if_range}、中科院 {cas_zone}、SCI {sci_zone} 内推荐 10 个真实期刊。给出期刊名、IF、分区、简介、OA 状态以及同数据库发表的相似文章 (真实 PMID)。"
         st.markdown(get_ai_response([{"role": "user", "content": prompt}]))
 
-# --- 模块 5: 三段式创新大脑 (全数据库) ---
+# --- 模块 5: 三段式创新大脑 ---
 with tabs[4]:
-    st.header("🚀 创新方案生成器 (全数据库联动)")
+    st.header("🚀 创新方案实验室 (多阶段交互)")
     
-    stage = st.radio("阶段", ["1. 思路探索", "2. 详细路径 (变量/计算)", "3. 报告生成 (1000字 Word)"], horizontal=True)
+    stage = st.radio("阶段选择", ["1. 思路与趋势探索", "2. 详细实施方案 (变量/代码)", "3. SCI 背景报告生成"], horizontal=True)
     
-    if stage == "1. 思路探索":
-        db = st.text_input("拟使用数据库 (如 NHANES + GBD)")
-        field = st.text_input("研究领域 (如 心血管共病)")
-        if st.button("获取最新高分发文思路"):
-            prompt = f"基于数据库{db}和领域{field}，给出3个最新创新思路（如机器学习预测、共病轨迹），附带近5年高分参考文章及创新性理由。"
+    if stage == "1. 思路与趋势探索":
+        db = st.text_input("数据库名 (如 NHANES + GBD)")
+        field = st.text_input("领域 (如 肌肉衰减症)")
+        if st.button("获取 2024+ 创新点"):
+            prompt = f"基于{db}和{field}，分析 2024-2025 发文趋势，给 3 个创新思路（如机器学习共病、孟德尔随机化联合）。提供参考文章及理由。"
             st.markdown(get_ai_response([{"role": "user", "content": prompt}]))
             
-    elif stage == "2. 详细路径 (变量/计算)":
+    elif stage == "2. 详细实施方案 (变量/代码)":
         c1, c2, c3 = st.columns(3)
-        exp, dbs, outc = c1.text_input("暴露因子"), c2.text_input("数据库名"), c3.text_input("结局疾病")
-        if st.button("生成详细筛选方案"):
-            prompt = f"数据库：{dbs}。暴露：{exp}。结局：{outc}。给出变量编码、计算公式、统计模型（RCS/WQS等）及创新逻辑。"
+        exp, dbs, outc = c1.text_input("暴露因子"), c2.text_input("数据库"), c3.text_input("结局")
+        if st.button("生成详细分析逻辑"):
+            prompt = f"数据库：{dbs}。暴露：{exp}。结局：{outc}。给出具体的筛选代码 (Variable Codes)、计算逻辑、中介效应/RCS分析建议及创新点。"
             st.markdown(get_ai_response([{"role": "user", "content": prompt}]))
             
-    elif stage == "3. 报告生成 (1000字 Word)":
-        st.chat_input("输入交互指令 (如：添加亚组分析)")
-        if st.button("生成 1000 字 SCI 背景完整报告"):
-            prompt = "生成一份 1000 字左右的 SCI 背景研究方案。要求：参考文献真实有效（近5年），方法论详尽。结果部分描述 Figure 1 (Flow chart), Table 1, Figure 2 (RCS plot), Figure 3 (Subgroup Forest Plot)。"
-            res = get_ai_response([{"role": "user", "content": prompt}])
-            st.markdown(res)
-            # Word 导出代码 (使用 python-docx)
-            doc = Document()
-            doc.add_heading('Research Innovation Report', 0)
-            doc.add_paragraph(res)
-            bio = io.BytesIO()
-            doc.save(bio)
-            st.download_button("下载完整 Word 报告", bio.getvalue(), "Proposal.docx")
+    elif stage == "3. 报告生成 ( Word)":
+        st.info("交互：输入指令微调报告内容...")
+        u_cmd = st.chat_input("例如：在背景中增加关于老龄化的数据...")
+        if st.button("生成 1000字 SCI 完整报告"):
+            prompt = "生成 1000 字 SCI 背景方案报告。要求：真实参考文献（近5年），详细方法，结果部分含 Figure 1-3 模拟描述。输出段落形式。"
+            report = get_ai_response([{"role": "user", "content": prompt}])
+            st.markdown(report)
+            # 导出 Word
+            d = Document()
+            d.add_heading('Research Innovation Report', 0)
+            d.add_paragraph(report)
+            b = io.BytesIO()
+            d.save(b)
+            st.download_button("下载完整报告 (Word)", b.getvalue(), "Research_Proposal.docx")
