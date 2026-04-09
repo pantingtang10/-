@@ -219,7 +219,7 @@ with tabs[4]:
         exp, dbs, outc = c1.text_input("暴露"), c2.text_input("数据库"), c3.text_input("结局")
         if st.button("生成详细筛选编码"):
             st.markdown(get_ai_response([{"role":"user","content":f"数据库{dbs}中，探究{exp}与{outc}。给出Variable Codes和计算公式。"}]))
-    elif step == "3. 生成 方案":
+    elif step == "3. 生成 1000字 方案":
         if st.button("生成 Word 报告预览"):
             report = get_ai_response([{"role":"user","content":"生成 1000 字 SCI 背景方案报告，含真实近5年文献及 Figure 1-3 模拟描述。"}])
             st.markdown(report)
