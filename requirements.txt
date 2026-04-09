@@ -2,3 +2,4 @@ streamlit
 openai
 pandas
 pillow
+diff-match-patch
