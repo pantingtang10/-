@@ -27,14 +27,48 @@ with st.sidebar:
     export_fmt = st.selectbox("格式", ["PDF", "PNG", "TIFF"])
 
 # --- AI 调用逻辑 ---
-def get_ai_response(messages, model="gpt-4o"):
-    if not api_key: return "⚠️ 请在侧边栏输入 API Key。"
+def get_ai_response(messages, vision=False):
+    if not api_key: 
+        return "⚠️ 请在左侧边栏输入 API 密钥。"
+    
+    # 根据用户选择，动态配置对应的 Base URL 和模型名称
+    if engine == "Google Gemini (Pro/Vision)":
+        # Gemini 的 OpenAI 兼容地址
+        b_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
+        m_name = "gemini-1.5-pro" # 建议用 Pro 处理学术逻辑
+    elif engine == "智谱 GLM-4v":
+        b_url = "https://open.bigmodel.cn/api/paas/v4/"
+        m_name = "glm-4v"
+    elif engine == "GPT-4o (推荐)":
+        b_url = "https://api.openai.com/v1"
+        m_name = "gpt-4o"
+    else:
+        b_url = "https://api.openai.com/v1"
+        m_name = "gpt-4o"
+
     try:
-        # 此处根据所选引擎动态切换 BaseURL，此处以 OpenAI 格式为例
-        client = openai.OpenAI(api_key=api_key)
-        response = client.chat.completions.create(model=model, messages=messages, temperature=0.3)
+        # 1. 实例化客户端
+        client = openai.OpenAI(api_key=api_key, base_url=b_url)
+        
+        # 2. 发起请求
+        response = client.chat.completions.create(
+            model=m_name,
+            messages=messages,
+            temperature=0.3,
+            max_tokens=4096 # 确保长报告输出完整
+        )
+        
         return response.choices[0].message.content
-    except Exception as e: return f"❌ 出错: {str(e)}"
+    except Exception as e:
+        # 捕获并解析常见的 API 错误
+        err_msg = str(e)
+        if "401" in err_msg:
+            return "❌ 错误 401：API Key 不正确，或该 Key 不属于选定的引擎供应商。"
+        elif "429" in err_msg:
+            return "❌ 错误 429：请求过快（免费版限额）。请等待一分钟后再试。"
+        elif "403" in err_msg:
+            return "❌ 错误 403：权限不足（可能地区受限）。"
+        return f"❌ 运行出错: {err_msg}"
 
 # --- UI 导航 ---
 st.title("🎓 顶级学术科研全生命周期工作站")
